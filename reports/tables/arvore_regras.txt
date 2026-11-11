@@ -1,0 +1,88 @@
+|--- aval_score_ponderado_soma <= 26.93
+|   |--- codigo_modulo_GGG <= 0.50
+|   |   |--- aval_score_medio <= 64.37
+|   |   |   |--- aval_score_medio <= 51.12
+|   |   |   |   |--- vle_dias_sem_acesso <= 32.50
+|   |   |   |   |   |--- truncated branch of depth 4
+|   |   |   |   |--- vle_dias_sem_acesso >  32.50
+|   |   |   |   |   |--- truncated branch of depth 2
+|   |   |   |--- aval_score_medio >  51.12
+|   |   |   |   |--- aval_n_devidas <= 2.50
+|   |   |   |   |   |--- truncated branch of depth 3
+|   |   |   |   |--- aval_n_devidas >  2.50
+|   |   |   |   |   |--- truncated branch of depth 6
+|   |   |--- aval_score_medio >  64.37
+|   |   |   |--- aval_taxa_entrega <= 0.92
+|   |   |   |   |--- log_vle_cliques_conteudo_ou <= 0.90
+|   |   |   |   |   |--- truncated branch of depth 6
+|   |   |   |   |--- log_vle_cliques_conteudo_ou >  0.90
+|   |   |   |   |   |--- truncated branch of depth 6
+|   |   |   |--- aval_taxa_entrega >  0.92
+|   |   |   |   |--- vle_dias_sem_acesso <= 2.50
+|   |   |   |   |   |--- truncated branch of depth 6
+|   |   |   |   |--- vle_dias_sem_acesso >  2.50
+|   |   |   |   |   |--- truncated branch of depth 6
+|   |--- codigo_modulo_GGG >  0.50
+|   |   |--- log_vle_cliques_ult_14d <= 2.14
+|   |   |   |--- vle_dias_sem_acesso <= 9.50
+|   |   |   |   |--- class: 0
+|   |   |   |--- vle_dias_sem_acesso >  9.50
+|   |   |   |   |--- log_vle_media_cliques_por_dia_ativo <= 2.44
+|   |   |   |   |   |--- truncated branch of depth 3
+|   |   |   |   |--- log_vle_media_cliques_por_dia_ativo >  2.44
+|   |   |   |   |   |--- truncated branch of depth 2
+|   |   |--- log_vle_cliques_ult_14d >  2.14
+|   |   |   |--- vle_primeiro_acesso <= -2.50
+|   |   |   |   |--- log_vle_cliques_quiz <= 3.02
+|   |   |   |   |   |--- truncated branch of depth 2
+|   |   |   |   |--- log_vle_cliques_quiz >  3.02
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- vle_primeiro_acesso >  -2.50
+|   |   |   |   |--- vle_dias_ativos <= 11.50
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- vle_dias_ativos >  11.50
+|   |   |   |   |   |--- class: 0
+|--- aval_score_ponderado_soma >  26.93
+|   |--- log_vle_cliques_quiz <= 2.01
+|   |   |--- aval_score_medio <= 89.63
+|   |   |   |--- faixa_etaria_ord <= 0.50
+|   |   |   |   |--- vle_tendencia_14d <= 0.05
+|   |   |   |   |   |--- truncated branch of depth 3
+|   |   |   |   |--- vle_tendencia_14d >  0.05
+|   |   |   |   |   |--- truncated branch of depth 4
+|   |   |   |--- faixa_etaria_ord >  0.50
+|   |   |   |   |--- log_vle_media_cliques_por_dia_ativo <= 2.87
+|   |   |   |   |   |--- truncated branch of depth 2
+|   |   |   |   |--- log_vle_media_cliques_por_dia_ativo >  2.87
+|   |   |   |   |   |--- class: 0
+|   |   |--- aval_score_medio >  89.63
+|   |   |   |--- aval_score_ponderado_soma <= 37.59
+|   |   |   |   |--- vle_dias_sem_acesso <= 0.50
+|   |   |   |   |   |--- class: 0
+|   |   |   |   |--- vle_dias_sem_acesso >  0.50
+|   |   |   |   |   |--- class: 0
+|   |   |   |--- aval_score_ponderado_soma >  37.59
+|   |   |   |   |--- class: 0
+|   |--- log_vle_cliques_quiz >  2.01
+|   |   |--- aval_score_medio <= 85.78
+|   |   |   |--- duracao_oferta_dias <= 240.50
+|   |   |   |   |--- vle_primeiro_acesso <= -3.50
+|   |   |   |   |   |--- truncated branch of depth 6
+|   |   |   |   |--- vle_primeiro_acesso >  -3.50
+|   |   |   |   |   |--- truncated branch of depth 2
+|   |   |   |--- duracao_oferta_dias >  240.50
+|   |   |   |   |--- vle_dias_ativos <= 67.50
+|   |   |   |   |   |--- truncated branch of depth 5
+|   |   |   |   |--- vle_dias_ativos >  67.50
+|   |   |   |   |   |--- class: 0
+|   |   |--- aval_score_medio >  85.78
+|   |   |   |--- vle_tendencia_14d <= 0.05
+|   |   |   |   |--- log_vle_cliques_painel_duplo <= 0.35
+|   |   |   |   |   |--- truncated branch of depth 2
+|   |   |   |   |--- log_vle_cliques_painel_duplo >  0.35
+|   |   |   |   |   |--- truncated branch of depth 3
+|   |   |   |--- vle_tendencia_14d >  0.05
+|   |   |   |   |--- log_vle_cliques_conteudo_ou <= 6.62
+|   |   |   |   |   |--- truncated branch of depth 4
+|   |   |   |   |--- log_vle_cliques_conteudo_ou >  6.62
+|   |   |   |   |   |--- class: 0

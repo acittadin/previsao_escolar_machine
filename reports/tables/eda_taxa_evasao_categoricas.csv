@@ -1,0 +1,54 @@
+variavel,categoria,taxa_evasao,n
+escolaridade_max,Sem qualificação formal,15.4,234
+escolaridade_max,Abaixo do A Level,13.6,9875
+escolaridade_max,A Level ou equivalente,11.4,11295
+escolaridade_max,Ensino superior,11.4,3887
+escolaridade_max,Pós-graduação,11.8,271
+faixa_imd,0-10%,14.2,2423
+faixa_imd,10-20%,13.2,2614
+faixa_imd,20-30%,14.7,2731
+faixa_imd,30-40%,12.3,2786
+faixa_imd,40-50%,11.5,2503
+faixa_imd,50-60%,11.2,2504
+faixa_imd,60-70%,12.6,2342
+faixa_imd,70-80%,11.5,2351
+faixa_imd,80-90%,11.1,2235
+faixa_imd,90-100%,10.5,2100
+faixa_etaria,Até 35,12.5,17773
+faixa_etaria,35 a 55,11.8,7609
+faixa_etaria,55 ou mais,10.0,180
+genero,Masculino,12.8,13987
+genero,Feminino,11.6,11575
+deficiencia,Sim,18.4,2352
+deficiencia,Não,11.6,23210
+num_tentativas_anteriores,6,33.3,3
+num_tentativas_anteriores,2,17.7,519
+num_tentativas_anteriores,1,15.4,2538
+num_tentativas_anteriores,3,12.7,102
+num_tentativas_anteriores,0,11.8,22364
+num_tentativas_anteriores,5,11.1,9
+num_tentativas_anteriores,4,7.4,27
+codigo_modulo,CCC,19.5,3054
+codigo_modulo,DDD,16.9,4835
+codigo_modulo,FFF,12.3,6105
+codigo_modulo,AAA,10.2,693
+codigo_modulo,BBB,9.4,6089
+codigo_modulo,EEE,8.3,2412
+codigo_modulo,GGG,5.6,2374
+codigo_oferta,2014B,13.1,5974
+codigo_oferta,2014J,12.9,8533
+codigo_oferta,2013B,11.9,3785
+codigo_oferta,2013J,11.0,7270
+regiao,Escócia,13.9,2950
+regiao,East Midlands,13.3,1780
+regiao,West Midlands,13.3,1924
+regiao,Noroeste,13.1,2153
+regiao,Norte,12.3,1422
+regiao,Londres,12.0,2391
+regiao,Sudoeste,12.0,1905
+regiao,Sul,12.0,2457
+regiao,País de Gales,11.8,1770
+regiao,Irlanda,11.6,1031
+regiao,Sudeste,11.2,1646
+regiao,Yorkshire,11.0,1514
+regiao,Anglia Oriental,10.9,2619

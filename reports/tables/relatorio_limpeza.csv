@@ -1,0 +1,10 @@
+etapa,resultado
+Duplicatas removidas (chave estudante+módulo+oferta),0
+Colunas removidas (vazamento/redundância),"resultado_final, vle_ultimo_acesso"
+Flag faixa_imd_ausente = 1,973
+Flag aval_sem_nota = 1,1726
+Colunas com log1p,24
+Linhas antes,25562
+Linhas depois,25562
+Colunas depois,56
+Nulos restantes (imputados no pipeline),data_registro=7; registrou_tarde=7; aval_score_medio=1726; aval_score_min=1726; aval_atraso_medio=1720; imd_ord=973
