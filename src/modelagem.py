@@ -1,20 +1,3 @@
-"""
-Modelagem supervisionada: Árvore de Decisão, Ensembles (Random Forest, Extra Trees,
-Gradient Boosting, Voting) e SVM (linear e RBF), com Regressão Logística como baseline.
-
-Protocolo
----------
-* Split TEMPORAL: treino = ofertas anteriores a config.OFERTA_TESTE; teste = oferta mais recente.
-* Ajuste de hiperparâmetros: GridSearchCV com GroupKFold(3) por estudante, métrica PR-AUC
-  (average precision), apropriada para classes desbalanceadas.
-* Desbalanceamento: class_weight="balanced" (sem reamostragem).
-* Limiar de decisão: escolhido para maximizar F1 nas previsões out-of-fold do TREINO
-  (o teste nunca é usado para escolher nada).
-* Seleção do "melhor modelo": pela PR-AUC out-of-fold (treino), não pelo teste.
-* Pré-processamento (imputação por mediana, escala, one-hot) dentro do Pipeline -> sem vazamento.
-
-Uso:  python -m src.modelagem [--rapido]
-"""
 import argparse
 import time
 import warnings
@@ -49,9 +32,6 @@ warnings.filterwarnings("ignore")
 sns.set_theme(style="whitegrid")
 
 
-# --------------------------------------------------------------------------------------------
-# Construção dos pipelines
-# --------------------------------------------------------------------------------------------
 def preprocessador(num, cat, escalar: bool) -> ColumnTransformer:
     num_pipe = Pipeline([
         ("imp", SimpleImputer(strategy="median")),
@@ -68,7 +48,6 @@ def pipe(est, num, cat, escalar):
 
 
 def especificacoes(num, cat, rapido: bool):
-    """Lista de (nome, familia, pipeline, grade, escalar, subamostra_na_busca)."""
     n_arv = 80 if rapido else 200
     S = C.SEED
     g = (lambda full, small: small if rapido else full)
@@ -104,15 +83,11 @@ def especificacoes(num, cat, rapido: bool):
         ("SVM RBF", "SVM",
          pipe(SVC(kernel="rbf", class_weight="balanced", cache_size=1000, random_state=S), num, cat, True),
          {"clf__C": g([0.5, 2], [1]), "clf__gamma": g(["scale", 0.01], ["scale"])},
-         4000 if rapido else 6000),   # busca em subamostra (SVC é O(n²)); refit no treino completo
+         4000 if rapido else 6000),
     ]
 
 
-# --------------------------------------------------------------------------------------------
-# Utilidades de avaliação
-# --------------------------------------------------------------------------------------------
 def pontuacao(modelo, X):
-    """Score contínuo: probabilidade da classe 'evade' ou distância à margem (SVM)."""
     if hasattr(modelo, "predict_proba"):
         return modelo.predict_proba(X)[:, 1]
     return modelo.decision_function(X)
@@ -129,7 +104,6 @@ def limiar_f1(y, s):
 
 
 def topo_k(y, s, frac=0.10):
-    """Recall e lift entre os 'frac' estudantes de maior risco (visão de intervenção)."""
     n = max(1, int(round(len(y) * frac)))
     idx = np.argsort(-s)[:n]
     rec = y[idx].sum() / y.sum()
@@ -152,9 +126,6 @@ def metricas(y, s, lim):
     }
 
 
-# --------------------------------------------------------------------------------------------
-# Execução
-# --------------------------------------------------------------------------------------------
 def main(rapido: bool = False):
     t0 = time.time()
     df = pd.read_csv(C.DATASET_LIMPO)
@@ -170,7 +141,6 @@ def main(rapido: bool = False):
     resultados, melhores, ajustados, scores_te, params_tab, oof_scores = [], {}, {}, {}, [], {}
 
     def avaliar(nome, familia, estimador, cv_best=np.nan, params=None):
-        """Treina no treino completo, gera OOF para o limiar e avalia no teste."""
         t1 = time.time()
         oof = cross_val_predict(clone(estimador), Xtr, ytr, groups=gtr, cv=cv,
                                 method=metodo_score(estimador), n_jobs=1)
@@ -192,7 +162,6 @@ def main(rapido: bool = False):
               f"PR={r['pr_auc']:.3f} F1={r['f1']:.3f} rec={r['recall']:.3f} prec={r['precisao']:.3f} "
               f"({r['tempo_s']}s)")
 
-    # 1) busca de hiperparâmetros + avaliação ------------------------------------------------------
     print("\nTreinando modelos...")
     for nome, familia, estimador, grade, subamostra in especificacoes(num, cat, rapido):
         gs = GridSearchCV(estimador, grade, scoring="average_precision", cv=cv, n_jobs=1, refit=False)
@@ -205,7 +174,6 @@ def main(rapido: bool = False):
         melhores[nome] = final
         avaliar(nome, familia, final, gs.best_score_, gs.best_params_)
 
-    # 2) Voting (ensemble heterogêneo) ---------------------------------------------------------------
     voting = VotingClassifier(
         estimators=[("rf", clone(melhores["Random Forest"])),
                     ("gb", clone(melhores["Gradient Boosting"])),
@@ -213,7 +181,6 @@ def main(rapido: bool = False):
         voting="soft", n_jobs=1)
     avaliar("Voting (RF + GB + LR)", "Ensemble", voting, np.nan, {"voting": "soft"})
 
-    # 3) tabelas ---------------------------------------------------------------------------------------
     res = pd.DataFrame(resultados).sort_values("pr_auc_oof", ascending=False).reset_index(drop=True)
     res.round(4).to_csv(C.TABELAS / "comparacao_modelos.csv", index=False)
     pd.DataFrame(params_tab).to_csv(C.TABELAS / "hiperparametros.csv", index=False)
@@ -223,7 +190,6 @@ def main(rapido: bool = False):
             "recall_top10%", "lift_top10%"]
     print(res[cols].round(3).to_string(index=False))
 
-    # 4) gráficos de comparação -----------------------------------------------------------------------------
     cores = dict(zip(res["modelo"], sns.color_palette("tab10", len(res))))
 
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -274,7 +240,6 @@ def main(rapido: bool = False):
     fig.savefig(C.FIG_MODELOS / "04_matrizes_confusao.png", dpi=130)
     plt.close(fig)
 
-    # 5) árvore de decisão interpretável ------------------------------------------------------------------------
     arv = ajustados["Árvore de Decisão"]
     nomes = arv.named_steps["pre"].get_feature_names_out()
     nomes = [n.split("__", 1)[1] for n in nomes]
@@ -290,7 +255,6 @@ def main(rapido: bool = False):
     imp_arv = pd.Series(arv.named_steps["clf"].feature_importances_, index=nomes).sort_values(ascending=False)
     imp_arv.head(20).round(4).to_csv(C.TABELAS / "importancia_arvore.csv", header=["importancia"])
 
-    # 6) importância por permutação (melhor modelo) ----------------------------------------------------------------
     print(f"\nImportância por permutação para '{melhor}'...")
     amostra = Xte.sample(min(2500, len(Xte)), random_state=C.SEED)
     ya = yte[Xte.index.get_indexer(amostra.index)]
@@ -308,7 +272,6 @@ def main(rapido: bool = False):
     plt.close(fig)
     print(imp.head(10).round(4).to_string(index=False))
 
-    # 7) aplicação: lista de estudantes por faixa de risco ---------------------------------------------------------
     s = scores_te[melhor]
     lim = res.set_index("modelo").loc[melhor, "limiar"]
     pr = te[[C.COL_ID, "codigo_modulo", C.COL_OFERTA, C.ALVO]].copy()

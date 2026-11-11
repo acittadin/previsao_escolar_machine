@@ -1,20 +1,3 @@
-"""
-Experimento: como a capacidade de prever a evasão muda conforme o dia de corte do curso?
-
-Para cada corte N (dias desde o início da oferta):
-  1. agrega os dados usando SOMENTE eventos até o dia N (cache em data/processed/cortes/);
-  2. remove quem já cancelou a matrícula até o dia N (a evasão já é conhecida);
-  3. limpa, divide (split temporal igual ao experimento principal) e treina os modelos;
-  4. avalia no teste (oferta 2014J), com limiar de decisão escolhido por F1 out-of-fold no treino.
-
-Os hiperparâmetros são FIXOS (os escolhidos na busca do corte de 90 dias), para que a comparação
-entre cortes isole o efeito da informação disponível. Ver limitações no README.
-
-Uso:
-    python -m src.experimento_cortes --agregar 0 30 60          # etapa 1 (lê data/raw)
-    python -m src.experimento_cortes --modelar 0 30 60 90       # etapas 2-4
-    python -m src.experimento_cortes --relatorio                # tabelas e gráficos finais
-"""
 import argparse
 import time
 import warnings
@@ -26,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+
 from sklearn.base import clone
 from sklearn.ensemble import ExtraTreesClassifier, HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -35,7 +19,7 @@ from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 
 from src import config as C
-from src.limpeza import colunas_modelo, dividir_treino_teste, limpar
+from src.limpeza import colunas_modelo, dividir_treino_teste, limpar_dados
 from src.modelagem import limiar_f1, metodo_score, metricas, pipe, pontuacao
 
 warnings.filterwarnings("ignore")
@@ -44,165 +28,170 @@ sns.set_theme(style="whitegrid")
 CORTES_PADRAO = [0, 30, 60, 90, 120, 180]
 PASTA_CORTES = C.DADOS_PROC / "cortes"
 ARQ_RESULTADOS = C.TABELAS / "cortes_resultados.csv"
+ARQ_POPULACAO = C.TABELAS / "cortes_populacao.csv"
+ARQ_MELHOR = C.TABELAS / "cortes_melhor_modelo.csv"
 FIG_CORTES = C.RAIZ / "reports" / "figures" / "cortes"
+
 PASTA_CORTES.mkdir(parents=True, exist_ok=True)
 FIG_CORTES.mkdir(parents=True, exist_ok=True)
 
 
-def modelos(num, cat):
-    """Mesmos modelos do experimento principal, com os hiperparâmetros escolhidos no corte de 90 dias."""
+def instanciar_modelos_fixos(num, cat):
+    """
+    Retorna os mesmos modelos do experimento principal com hiperparâmetros já
+    otimizados no corte de 90 dias, para isolar o efeito da linha do tempo.
+    """
     S = C.SEED
     return {
-        "Regressão Logística (baseline)": pipe(LogisticRegression(
-            C=1, class_weight="balanced", max_iter=3000, random_state=S), num, cat, True),
-        "Árvore de Decisão": pipe(DecisionTreeClassifier(
-            max_depth=10, min_samples_leaf=100, class_weight="balanced", random_state=S), num, cat, False),
-        "Random Forest": pipe(RandomForestClassifier(
-            n_estimators=200, max_depth=12, min_samples_leaf=30, class_weight="balanced_subsample",
-            n_jobs=-1, random_state=S), num, cat, False),
-        "Extra Trees": pipe(ExtraTreesClassifier(
-            n_estimators=200, max_depth=14, min_samples_leaf=20, class_weight="balanced_subsample",
-            n_jobs=-1, random_state=S), num, cat, False),
-        "Gradient Boosting": pipe(HistGradientBoostingClassifier(
-            learning_rate=0.03, max_depth=5, max_iter=200, min_samples_leaf=50, class_weight="balanced",
-            early_stopping=False, random_state=S), num, cat, False),
-        "SVM RBF": pipe(SVC(
-            kernel="rbf", C=0.5, gamma=0.01, class_weight="balanced", cache_size=1000, random_state=S),
-            num, cat, True),
+        "Regressão Logística (baseline)": pipe(
+            LogisticRegression(C=1, class_weight="balanced", max_iter=3000, random_state=S), num, cat, True
+        ),
+        "Árvore de Decisão": pipe(
+            DecisionTreeClassifier(max_depth=10, min_samples_leaf=100, class_weight="balanced", random_state=S), num, cat, False
+        ),
+        "Random Forest": pipe(
+            RandomForestClassifier(n_estimators=200, max_depth=12, min_samples_leaf=30, class_weight="balanced_subsample", n_jobs=-1, random_state=S), num, cat, False
+        ),
+        "Extra Trees": pipe(
+            ExtraTreesClassifier(n_estimators=200, max_depth=14, min_samples_leaf=20, class_weight="balanced_subsample", n_jobs=-1, random_state=S), num, cat, False
+        ),
+        "Gradient Boosting": pipe(
+            HistGradientBoostingClassifier(learning_rate=0.03, max_depth=5, max_iter=200, min_samples_leaf=50, class_weight="balanced", early_stopping=False, random_state=S), num, cat, False
+        ),
+        "SVM RBF": pipe(
+            SVC(kernel="rbf", C=0.5, gamma=0.01, class_weight="balanced", cache_size=1000, random_state=S), num, cat, True
+        ),
     }
 
 
-# --------------------------------------------------------------------------------------------
-def agregar(cortes, pasta_raw: Path):
-    from src.agregacao import carregar, montar
+def agregar_cortes(cortes, pasta_raw: Path):
+    from src.agregacao import carregar_dados_brutos, montar_dataset_final
     from src.traducao import traduzir
 
     t0 = time.time()
-    d = carregar(pasta_raw)
-    print(f"CSVs carregados em {time.time() - t0:.0f}s")
-    for n in cortes:
+    print("Carregando CSVs originais do OULAD...")
+    dados_brutos = carregar_dados_brutos(pasta_raw)
+    print(f"Concluído em {time.time() - t0:.0f}s")
+
+    for dias in cortes:
         t1 = time.time()
-        df = traduzir(montar(pasta_raw, n, d=d))
-        df.to_csv(PASTA_CORTES / f"dataset_corte_{n}.csv", index=False)
-        print(f"corte {n:>3}: {df.shape} | evasão {df[C.ALVO].mean():.1%} | {time.time() - t1:.0f}s", flush=True)
+        df_corte = traduzir(montar_dataset_final(pasta_raw, dias, d=dados_brutos))
+        caminho_salvamento = PASTA_CORTES / f"dataset_corte_{dias}.csv"
+        df_corte.to_csv(caminho_salvamento, index=False)
+        print(f"Corte {dias:>3} dias: {len(df_corte)} registros salvos em {caminho_salvamento.name} ({time.time() - t1:.0f}s)")
 
 
-def modelar(cortes):
-    existentes = pd.read_csv(ARQ_RESULTADOS) if ARQ_RESULTADOS.exists() else pd.DataFrame()
+def modelar(cortes=None):
+    if cortes is None:
+        cortes = CORTES_PADRAO
+
+    resultados, resumo_populacao = [], []
     cv = GroupKFold(n_splits=3)
-    for n in cortes:
-        arq = PASTA_CORTES / f"dataset_corte_{n}.csv"
-        if not arq.exists():
-            print(f"corte {n}: dataset não encontrado ({arq.name}); rode --agregar antes")
+
+    for dias in cortes:
+        caminho = PASTA_CORTES / f"dataset_corte_{dias}.csv"
+        if not caminho.exists():
+            print(f"Arquivo ausente para corte {dias}: {caminho}. Rode `python main.py --etapas cortes` ou gere os cortes primeiro.")
             continue
-        df, _ = limpar(pd.read_csv(arq), cutoff=n)
-        tr, te = dividir_treino_teste(df)
-        num, cat = colunas_modelo(df)
+
+        df = pd.read_csv(caminho)
+        df_limpo = limpar_dados(df, cutoff=dias)
+        tr, te = dividir_treino_teste(df_limpo)
+        num, cat = colunas_modelo(df_limpo)
         feats = num + cat
+
         Xtr, ytr, gtr = tr[feats], tr[C.ALVO].values, tr[C.COL_ID].values
         Xte, yte = te[feats], te[C.ALVO].values
-        print(f"\n=== corte {n} dias | treino {len(tr)} ({ytr.mean():.1%}) | teste {len(te)} ({yte.mean():.1%}) "
-              f"| {len(feats)} variáveis", flush=True)
 
-        linhas = []
-        for nome, est in modelos(num, cat).items():
-            t1 = time.time()
-            oof = cross_val_predict(clone(est), Xtr, ytr, groups=gtr, cv=cv, method=metodo_score(est))
+        resumo_populacao.append({
+            "corte_dias": dias,
+            "n_treino": len(tr),
+            "n_teste": len(te),
+            "prevalencia_treino": float(ytr.mean()),
+            "prevalencia_teste": float(yte.mean()),
+        })
+
+        modelos = instanciar_modelos_fixos(num, cat)
+        for nome, modelo in modelos.items():
+            oof = cross_val_predict(clone(modelo), Xtr, ytr, groups=gtr, cv=cv,
+                                   method=metodo_score(modelo), n_jobs=1)
             if oof.ndim == 2:
                 oof = oof[:, 1]
-            lim = limiar_f1(ytr, oof)
-            modelo = clone(est).fit(Xtr, ytr)
-            s = pontuacao(modelo, Xte)
-            linhas.append({
-                "corte_dias": n, "modelo": nome, "n_treino": len(tr), "n_teste": len(te),
-                "prevalencia_treino": ytr.mean(), "prevalencia_teste": yte.mean(),
-                "pr_auc_oof": average_precision_score(ytr, oof), "limiar": lim, **metricas(yte, s, lim),
-            })
-            r = linhas[-1]
-            print(f"  {nome:<32} ROC={r['roc_auc']:.3f} PR={r['pr_auc']:.3f} F1={r['f1']:.3f} "
-                  f"lift@10%={r['lift_top10%']:.2f} ({time.time() - t1:.0f}s)", flush=True)
+            limiar = limiar_f1(ytr, oof)
 
-        if len(existentes):
-            existentes = existentes[existentes["corte_dias"] != n]
-        existentes = pd.concat([existentes, pd.DataFrame(linhas)], ignore_index=True)
-        existentes.sort_values(["corte_dias", "modelo"]).round(4).to_csv(ARQ_RESULTADOS, index=False)
+            modelo_final = clone(modelo).fit(Xtr, ytr)
+            s_te = pontuacao(modelo_final, Xte)
+            m = metricas(yte, s_te, limiar)
+            res = {
+                "corte_dias": dias,
+                "modelo": nome,
+                "n_treino": len(tr),
+                "n_teste": len(te),
+                "prevalencia_treino": float(ytr.mean()),
+                "prevalencia_teste": float(yte.mean()),
+                "pr_auc_oof": float(average_precision_score(ytr, oof)),
+                "limiar": float(limiar),
+                **m,
+            }
+            resultados.append(res)
+            print(f"[{dias:>3}d] {nome:<34} OOF PR-AUC={res['pr_auc_oof']:.3f} | ROC={res['roc_auc']:.3f} PR={res['pr_auc']:.3f} F1={res['f1']:.3f}")
+
+    pd.DataFrame(resultados).sort_values(["corte_dias", "pr_auc_oof"], ascending=[True, False]).to_csv(ARQ_RESULTADOS, index=False)
+    pd.DataFrame(resumo_populacao).to_csv(ARQ_POPULACAO, index=False)
+
+    melhor_por_corte = (
+        pd.DataFrame(resultados)
+        .sort_values(["corte_dias", "pr_auc_oof"], ascending=[True, False])
+        .groupby("corte_dias", as_index=False)
+        .first()
+    )
+    melhor_por_corte[["corte_dias", "modelo", "pr_auc_oof", "roc_auc", "pr_auc", "f1", "recall", "precisao", "lift_top10%", "recall_top10%"]].to_csv(ARQ_MELHOR, index=False)
+
+    print(f"\nResultados salvos em {ARQ_RESULTADOS}")
+    print(f"População por corte em {ARQ_POPULACAO}")
+    print(f"Melhor modelo por corte em {ARQ_MELHOR}")
 
 
 def relatorio():
-    r = pd.read_csv(ARQ_RESULTADOS)
-    # PR-AUC dividida pela prevalência = "quantas vezes melhor que o acaso" (comparável entre cortes)
-    r["pr_auc_relativa"] = r["pr_auc"] / r["prevalencia_teste"]
-    cortes = sorted(r["corte_dias"].unique())
-    print(f"Cortes disponíveis: {cortes}")
+    if not ARQ_RESULTADOS.exists():
+        print(f"Arquivo de resultados ausente em {ARQ_RESULTADOS}. Rode modelar() primeiro.")
+        return
 
-    prev = r.groupby("corte_dias")[["n_treino", "n_teste", "prevalencia_treino", "prevalencia_teste"]].first()
-    prev.round(4).to_csv(C.TABELAS / "cortes_populacao.csv")
-    print("\nPopulação por corte:\n", prev.round(3).to_string())
+    df = pd.read_csv(ARQ_RESULTADOS)
+    if df.empty:
+        print("Nenhum resultado disponível para o relatório.")
+        return
 
-    resumo = r.pivot(index="modelo", columns="corte_dias", values="pr_auc").round(3)
-    print("\nPR-AUC no teste:\n", resumo.to_string())
-    print("\nPR-AUC relativa ao acaso (PR-AUC / prevalência):\n",
-          r.pivot(index="modelo", columns="corte_dias", values="pr_auc_relativa").round(2).to_string())
-    print("\nROC-AUC no teste:\n", r.pivot(index="modelo", columns="corte_dias", values="roc_auc").round(3).to_string())
-    print("\nLift no top 10%:\n", r.pivot(index="modelo", columns="corte_dias", values="lift_top10%").round(2).to_string())
-    print("\nF1 (limiar do treino):\n", r.pivot(index="modelo", columns="corte_dias", values="f1").round(3).to_string())
+    melhor = (df.sort_values(["corte_dias", "pr_auc_oof"], ascending=[True, False])
+               .groupby("corte_dias", as_index=False)
+               .first())
+    print("\nMelhor modelo por corte (critério: PR-AUC out-of-fold no treino):")
+    print(melhor[["corte_dias", "modelo", "pr_auc_oof", "roc_auc", "pr_auc", "lift_top10%"]].to_string(index=False))
 
-    # melhor modelo por corte, escolhido pela PR-AUC out-of-fold (critério do treino)
-    melhores = r.loc[r.groupby("corte_dias")["pr_auc_oof"].idxmax(),
-                     ["corte_dias", "modelo", "pr_auc_oof", "roc_auc", "pr_auc", "f1", "recall", "precisao",
-                      "lift_top10%", "recall_top10%"]]
-    melhores.round(3).to_csv(C.TABELAS / "cortes_melhor_modelo.csv", index=False)
-    print("\nMelhor modelo por corte (critério: PR-AUC out-of-fold):\n", melhores.round(3).to_string(index=False))
-
-    estilo = dict(marker="o")
-    fig, axes = plt.subplots(2, 3, figsize=(17, 9))
-    paineis = [("roc_auc", "ROC-AUC"), ("pr_auc_relativa", "PR-AUC ÷ prevalência (x vezes o acaso)"),
-               ("lift_top10%", "Lift entre os 10% de maior risco"), ("pr_auc", "PR-AUC (NÃO comparável entre cortes)"),
-               ("f1", "F1 (NÃO comparável entre cortes)"), ("recall_top10%", "Recall entre os 10% de maior risco")]
-    for ax, (col, tit) in zip(axes.ravel(), paineis):
-        sns.lineplot(data=r, x="corte_dias", y=col, hue="modelo", ax=ax, **estilo)
-        ax.set(title=tit, xlabel="Dia de corte do curso", ylabel="")
-        ax.set_xticks(cortes)
-        if col == "pr_auc":
-            ax.plot(prev.index, prev["prevalencia_teste"], "k--", label="acaso (prevalência)")
-        if col in ("pr_auc_relativa", "roc_auc"):
-            ax.axhline(1 if col == "pr_auc_relativa" else 0.5, color="k", ls="--", lw=1)
-        ax.legend(fontsize=6)
-    fig.suptitle(f"Desempenho no teste ({C.OFERTA_TESTE}) conforme o dia de corte")
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for nome in sorted(df["modelo"].unique()):
+        tmp = df[df["modelo"] == nome].sort_values("corte_dias")
+        ax.plot(tmp["corte_dias"], tmp["roc_auc"], marker="o", label=nome)
+    ax.set_title("ROC-AUC por corte de tempo")
+    ax.set_xlabel("Dias de corte")
+    ax.set_ylabel("ROC-AUC")
+    ax.legend(fontsize=8, loc="best")
     fig.tight_layout()
-    fig.savefig(FIG_CORTES / "01_desempenho_por_corte.png", dpi=130)
+    fig.savefig(FIG_CORTES / "roc_auc_por_corte.png", dpi=130)
     plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.plot(prev.index, prev["prevalencia_teste"] * 100, "o-", color="#E45756", label="teste")
-    ax.plot(prev.index, prev["prevalencia_treino"] * 100, "o--", color="#4C78A8", label="treino")
-    ax.set(xlabel="Dia de corte", ylabel="Taxa de evasão restante (%)",
-           title="Evasão ainda por acontecer entre os estudantes ativos no corte")
-    ax.set_xticks(cortes)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(FIG_CORTES / "02_prevalencia_por_corte.png", dpi=130)
-    plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.bar([str(c) for c in prev.index], prev["n_teste"], color="#4C78A8")
-    ax.set(xlabel="Dia de corte", ylabel="Estudantes no teste", title="Estudantes ainda ativos no corte (teste)")
-    fig.tight_layout()
-    fig.savefig(FIG_CORTES / "03_estudantes_ativos_por_corte.png", dpi=130)
-    plt.close(fig)
-    print(f"\nFiguras em {FIG_CORTES}")
+def main():
+    parser = argparse.ArgumentParser(description="Experimento com cortes temporais para estimar atrelamento do desempenho ao tempo no curso.")
+    parser.add_argument("--cortes", nargs="*", type=int, default=CORTES_PADRAO)
+    parser.add_argument("--agregar", action="store_true")
+    args = parser.parse_args()
+
+    if args.agregar:
+        agregar_cortes(args.cortes, C.DADOS_RAW)
+    modelar(args.cortes)
+    relatorio()
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--agregar", nargs="*", type=int, help="cortes a agregar (usa data/raw)")
-    ap.add_argument("--modelar", nargs="*", type=int, help="cortes a modelar")
-    ap.add_argument("--relatorio", action="store_true")
-    ap.add_argument("--raw", default=str(C.DADOS_RAW))
-    a = ap.parse_args()
-    if a.agregar is not None:
-        agregar(a.agregar or CORTES_PADRAO, Path(a.raw))
-    if a.modelar is not None:
-        modelar(a.modelar or CORTES_PADRAO)
-    if a.relatorio:
-        relatorio()
+    main()

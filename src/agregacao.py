@@ -1,28 +1,18 @@
-"""
-Agregação do OULAD (Open University Learning Analytics Dataset)
-Tema: previsão de evasão escolar.
-
-Unidade de análise: 1 linha = 1 estudante em 1 oferta de módulo
-                    (id_student, code_module, code_presentation)
-Alvo (target):      evasao = 1 se final_result == 'Withdrawn', senão 0
-
-Uso:
-    python agregacao_oulad.py --dados ./oulad --cutoff 90 --saida dataset_evasao.csv [--traduzir]
-
---cutoff N  -> usa apenas informação disponível até o dia N do curso
-               (previsão precoce, sem vazamento de dados).
---cutoff -1 -> usa o curso inteiro (ATENÇÃO: gera vazamento, só para comparação).
-"""
 import argparse
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
-KEY = ["code_module", "code_presentation", "id_student"]
+# Chave primária: um estudante em um módulo e uma oferta de semestre específica
+CHAVE_PRIMARIA = ["code_module", "code_presentation", "id_student"]
 
-
-def carregar(pasta: Path) -> dict:
+def carregar_dados_brutos(pasta: Path) -> dict:
+    """
+    Lê os 7 arquivos CSV originais do OULAD e os coloca num dicionário.
+    A tabela studentVle (com ~10 milhões de linhas) é carregada com tipos otimizados
+    para economizar memória (category e int16).
+    """
+    print(f"Carregando arquivos da pasta: {pasta}")
     d = {}
     d["courses"] = pd.read_csv(pasta / "courses.csv")
     d["assessments"] = pd.read_csv(pasta / "assessments.csv")
@@ -30,7 +20,7 @@ def carregar(pasta: Path) -> dict:
     d["student_info"] = pd.read_csv(pasta / "studentInfo.csv")
     d["student_reg"] = pd.read_csv(pasta / "studentRegistration.csv")
     d["vle"] = pd.read_csv(pasta / "vle.csv")
-    # tabela grande (~10,6M linhas): tipos menores para economizar memória
+    
     d["student_vle"] = pd.read_csv(
         pasta / "studentVle.csv",
         dtype={
@@ -45,93 +35,100 @@ def carregar(pasta: Path) -> dict:
     return d
 
 
-# ----------------------------------------------------------------------------
-# 1) Base: demografia + registro + alvo
-# ----------------------------------------------------------------------------
-def base_estudante(d: dict, cutoff: int | None) -> pd.DataFrame:
-    base = d["student_info"].merge(d["student_reg"], on=KEY, how="left")
-    base = base.merge(d["courses"], on=["code_module", "code_presentation"], how="left")
+def preparar_demografia_e_alvo(d: dict, corte_dias: int) -> pd.DataFrame:
+    """
+    Junta as informações do estudante com os dados do curso e cria a variável alvo 'evadiu'.
+    Alunos que já cancelaram a matrícula ANTES do dia de corte são removidos, 
+    pois não há sentido em prever a evasão de quem já evadiu.
+    """
+    df = d["student_info"].merge(d["student_reg"], on=CHAVE_PRIMARIA, how="left")
+    df = df.merge(d["courses"], on=["code_module", "code_presentation"], how="left")
 
-    base["evasao"] = (base["final_result"] == "Withdrawn").astype(int)
+    # Criação do Alvo (1 para evasão, 0 para aprovados/reprovados)
+    df["evadiu"] = (df["final_result"] == "Withdrawn").astype(int)
 
-    if cutoff is not None:
-        # Quem já cancelou a matrícula até o cutoff já "evadiu": não há o que prever.
-        ja_saiu = base["date_unregistration"].notna() & (base["date_unregistration"] <= cutoff)
-        print(f"Removendo {ja_saiu.sum()} estudantes que já cancelaram até o dia {cutoff}")
-        base = base[~ja_saiu].copy()
+    if corte_dias is not None:
+        cancelou_cedo = df["date_unregistration"].notna() & (df["date_unregistration"] <= corte_dias)
+        print(f"Removendo {cancelou_cedo.sum()} estudantes que já cancelaram até o dia {corte_dias}")
+        df = df[~cancelou_cedo].copy()
 
-    # Atenção: date_unregistration e final_result são vazamento -> não viram feature.
-    # date_registration é conhecido antes do início do curso (valor negativo = dias antes).
-    base["registrou_tarde"] = (base["date_registration"] > 0).astype(float)
-    base.loc[base["date_registration"].isna(), "registrou_tarde"] = np.nan
-    return base
+    # O registro tem valores negativos para alunos que se matricularam dias antes de o curso iniciar
+    df["registrou_tarde"] = (df["date_registration"] > 0).astype(float)
+    df.loc[df["date_registration"].isna(), "registrou_tarde"] = np.nan
+    
+    return df
 
 
-# ----------------------------------------------------------------------------
-# 2) Features de engajamento no VLE (cliques)
-# ----------------------------------------------------------------------------
-def features_vle(d: dict, cutoff: int | None) -> pd.DataFrame:
-    sv = d["student_vle"]
-    if cutoff is not None:
-        sv = sv[sv["date"] <= cutoff]
+def preparar_engajamento_vle(d: dict, corte_dias: int) -> pd.DataFrame:
+    """
+    Agrupa os milhões de cliques no ambiente virtual (VLE) por estudante.
+    Se um corte temporal for definido, ignora todos os cliques que aconteceram depois do dia de corte.
+    """
+    cliques = d["student_vle"]
+    
+    if corte_dias is not None:
+        cliques = cliques[cliques["date"] <= corte_dias]
 
-    # junta o tipo de atividade (forumng, quiz, resource, ...)
-    vle = d["vle"][["id_site", "code_module", "code_presentation", "activity_type"]]
-    sv = sv.merge(vle, on=["id_site", "code_module", "code_presentation"], how="left")
-    sv["code_module"] = sv["code_module"].astype(str)
-    sv["code_presentation"] = sv["code_presentation"].astype(str)
+    # Cruza com a tabela VLE para saber o tipo de material clicado (PDF, fórum, quiz, etc)
+    tipos_vle = d["vle"][["id_site", "code_module", "code_presentation", "activity_type"]]
+    cliques = cliques.merge(tipos_vle, on=["id_site", "code_module", "code_presentation"], how="left")
+    
+    # Corrige os tipos das colunas categóricas perdidos no merge
+    cliques["code_module"] = cliques["code_module"].astype(str)
+    cliques["code_presentation"] = cliques["code_presentation"].astype(str)
 
-    g = sv.groupby(KEY, observed=True)
-    out = g.agg(
-        vle_total_clicks=("sum_click", "sum"),
+    agrupado = cliques.groupby(CHAVE_PRIMARIA, observed=True)
+    df_engajamento = agrupado.agg(
+        vle_total_cliques=("sum_click", "sum"),
         vle_dias_ativos=("date", "nunique"),
         vle_sites_distintos=("id_site", "nunique"),
         vle_primeiro_acesso=("date", "min"),
         vle_ultimo_acesso=("date", "max"),
     )
-    out["vle_media_clicks_por_dia_ativo"] = out["vle_total_clicks"] / out["vle_dias_ativos"]
+    df_engajamento["vle_media_cliques_por_dia_ativo"] = df_engajamento["vle_total_cliques"] / df_engajamento["vle_dias_ativos"]
 
-    # cliques antes do início do curso (date < 0) e na janela mais recente
-    pre = sv[sv["date"] < 0].groupby(KEY, observed=True)["sum_click"].sum().rename("vle_clicks_pre_curso")
-    out = out.join(pre)
+    # Calcula engajamento antes de as aulas começarem (dias negativos)
+    cliques_pre = cliques[cliques["date"] < 0].groupby(CHAVE_PRIMARIA, observed=True)["sum_click"].sum().rename("vle_cliques_pre_curso")
+    df_engajamento = df_engajamento.join(cliques_pre)
 
-    if cutoff is not None:
+    if corte_dias is not None:
         for janela in (14, 30):
-            rec = sv[sv["date"] > cutoff - janela].groupby(KEY, observed=True)["sum_click"].sum()
-            out = out.join(rec.rename(f"vle_clicks_ult_{janela}d"))
-            out[f"vle_clicks_ult_{janela}d"] = out[f"vle_clicks_ult_{janela}d"].fillna(0)
-        out["vle_dias_sem_acesso"] = cutoff - out["vle_ultimo_acesso"]
-        out["vle_tendencia_14d"] = out["vle_clicks_ult_14d"] / (out["vle_total_clicks"] + 1)
+            cliques_recentes = cliques[cliques["date"] > (corte_dias - janela)].groupby(CHAVE_PRIMARIA, observed=True)["sum_click"].sum()
+            df_engajamento = df_engajamento.join(cliques_recentes.rename(f"vle_cliques_ult_{janela}d"))
+            df_engajamento[f"vle_cliques_ult_{janela}d"] = df_engajamento[f"vle_cliques_ult_{janela}d"].fillna(0)
+            
+        df_engajamento["vle_dias_sem_acesso"] = corte_dias - df_engajamento["vle_ultimo_acesso"]
+        # Tendência: quantos cliques dos últimos 14 dias representam do total acumulado?
+        df_engajamento["vle_tendencia_14d"] = df_engajamento["vle_cliques_ult_14d"] / (df_engajamento["vle_total_cliques"] + 1)
 
-    # cliques por tipo de atividade (pivot)
-    por_tipo = (
-        sv.groupby(KEY + ["activity_type"], observed=True)["sum_click"].sum().unstack(fill_value=0)
-    )
-    por_tipo.columns = [f"vle_clicks_{c}" for c in por_tipo.columns]
-    out = out.join(por_tipo)
+    # Transforma o tipo de atividade do VLE em colunas (pivot)
+    por_tipo = cliques.groupby(CHAVE_PRIMARIA + ["activity_type"], observed=True)["sum_click"].sum().unstack(fill_value=0)
+    por_tipo.columns = [f"vle_cliques_{c}" for c in por_tipo.columns]
+    df_engajamento = df_engajamento.join(por_tipo).reset_index()
 
-    out = out.reset_index()
-    cols_zero = [c for c in out.columns if c.startswith("vle_clicks") or c in ("vle_total_clicks",)]
-    out[cols_zero] = out[cols_zero].fillna(0)
-    return out
+    # Se a pessoa não tem cliques num tipo específico, preenche com 0
+    colunas_com_cliques = [c for c in df_engajamento.columns if c.startswith("vle_cliques") or c == "vle_total_cliques"]
+    df_engajamento[colunas_com_cliques] = df_engajamento[colunas_com_cliques].fillna(0)
+    
+    return df_engajamento
 
 
-# ----------------------------------------------------------------------------
-# 3) Features de avaliações
-# ----------------------------------------------------------------------------
-def features_avaliacoes(d: dict, cutoff: int | None) -> pd.DataFrame:
-    a = d["assessments"]
-    sa = d["student_assessment"].merge(a, on="id_assessment", how="left")
-    # a coluna 'date' das avaliações é o prazo (NaN em alguns exames finais)
+def preparar_avaliacoes(d: dict, corte_dias: int) -> pd.DataFrame:
+    """
+    Mapeia as notas, entregas e atrasos dos alunos nas avaliações.
+    Respeita o corte temporal para não contar notas que o aluno só tirou no fim do curso.
+    """
+    avaliacoes_gerais = d["assessments"]
+    entregas_aluno = d["student_assessment"].merge(avaliacoes_gerais, on="id_assessment", how="left")
 
-    if cutoff is not None:
-        sa = sa[sa["date_submitted"] <= cutoff]
+    if corte_dias is not None:
+        entregas_aluno = entregas_aluno[entregas_aluno["date_submitted"] <= corte_dias]
 
-    sa["atraso_dias"] = sa["date_submitted"] - sa["date"]
-    sa["entregue_atrasada"] = (sa["atraso_dias"] > 0).astype(int)
-    sa["score_ponderado"] = sa["score"] * sa["weight"] / 100.0
+    entregas_aluno["atraso_dias"] = entregas_aluno["date_submitted"] - entregas_aluno["date"]
+    entregas_aluno["entregue_atrasada"] = (entregas_aluno["atraso_dias"] > 0).astype(int)
+    entregas_aluno["score_ponderado"] = entregas_aluno["score"] * entregas_aluno["weight"] / 100.0
 
-    out = sa.groupby(KEY).agg(
+    df_avaliacoes = entregas_aluno.groupby(CHAVE_PRIMARIA).agg(
         aval_n_entregues=("id_assessment", "nunique"),
         aval_score_medio=("score", "mean"),
         aval_score_min=("score", "min"),
@@ -141,67 +138,76 @@ def features_avaliacoes(d: dict, cutoff: int | None) -> pd.DataFrame:
         aval_n_banked=("is_banked", "sum"),
     ).reset_index()
 
-    # quantas avaliações já tinham prazo até o cutoff (para calcular taxa de entrega)
-    av_prazo = a.dropna(subset=["date"])
-    if cutoff is not None:
-        av_prazo = av_prazo[av_prazo["date"] <= cutoff]
-    devidas = av_prazo.groupby(["code_module", "code_presentation"]).agg(
+    # Conta quantas provas o aluno DEVERIA ter feito até o dia de corte
+    av_prazo = avaliacoes_gerais.dropna(subset=["date"])
+    if corte_dias is not None:
+        av_prazo = av_prazo[av_prazo["date"] <= corte_dias]
+        
+    provas_devidas = av_prazo.groupby(["code_module", "code_presentation"]).agg(
         aval_n_devidas=("id_assessment", "nunique")
     ).reset_index()
-    return out, devidas
+    
+    return df_avaliacoes, provas_devidas
 
 
-# ----------------------------------------------------------------------------
-# 4) Montagem final
-# ----------------------------------------------------------------------------
-def montar(pasta: Path, cutoff: int | None, d: dict | None = None) -> pd.DataFrame:
-    d = d if d is not None else carregar(pasta)
+def montar_dataset_final(pasta: Path, corte_dias: int, d: dict | None = None) -> pd.DataFrame:
+    """Consolida as três bases agregadas em um único Dataset rico."""
+    d = carregar_dados_brutos(pasta) if d is None else d
 
-    base = base_estudante(d, cutoff)
-    vle = features_vle(d, cutoff)
-    aval, devidas = features_avaliacoes(d, cutoff)
+    print("Consolidando Demografia, Engajamento no VLE e Histórico de Avaliações...")
+    df_base = preparar_demografia_e_alvo(d, corte_dias)
+    df_vle = preparar_engajamento_vle(d, corte_dias)
+    df_aval, df_devidas = preparar_avaliacoes(d, corte_dias)
 
-    df = base.merge(vle, on=KEY, how="left").merge(aval, on=KEY, how="left")
-    df = df.merge(devidas, on=["code_module", "code_presentation"], how="left")
+    df_final = df_base.merge(df_vle, on=CHAVE_PRIMARIA, how="left").merge(df_aval, on=CHAVE_PRIMARIA, how="left")
+    df_final = df_final.merge(df_devidas, on=["code_module", "code_presentation"], how="left")
 
-    # Quem nunca apareceu no VLE / nunca entregou nada: zero, não ausente
-    for c in df.columns:
-        if c.startswith("vle_clicks") or c in (
-            "vle_total_clicks", "vle_dias_ativos", "vle_sites_distintos",
+    # Alunos que nunca entraram no portal ou não fizeram provas ganham 0 por padrão, não nulo (NaN)
+    colunas_para_zerar = [
+        c for c in df_final.columns if c.startswith("vle_cliques") or c in (
+            "vle_total_cliques", "vle_dias_ativos", "vle_sites_distintos",
             "aval_n_entregues", "aval_n_atrasadas", "aval_n_banked",
-            "aval_score_ponderado_soma",
-        ):
-            df[c] = df[c].fillna(0)
-    df["aval_n_devidas"] = df["aval_n_devidas"].fillna(0)
-    df["aval_taxa_entrega"] = np.where(
-        df["aval_n_devidas"] > 0,
-        (df["aval_n_entregues"] / df["aval_n_devidas"]).clip(upper=1),
+            "aval_score_ponderado_soma"
+        )
+    ]
+    for c in colunas_para_zerar:
+        df_final[c] = df_final[c].fillna(0)
+        
+    df_final["aval_n_devidas"] = df_final["aval_n_devidas"].fillna(0)
+    
+    # Calcula a taxa de provas entregues (evitando divisão por zero)
+    df_final["aval_taxa_entrega"] = np.where(
+        df_final["aval_n_devidas"] > 0,
+        (df_final["aval_n_entregues"] / df_final["aval_n_devidas"]).clip(upper=1),
         np.nan,
     )
-    df["nunca_acessou_vle"] = (df["vle_total_clicks"] == 0).astype(int)
+    df_final["nunca_acessou_vle"] = (df_final["vle_total_cliques"] == 0).astype(int)
 
-    # Remove colunas que vazam o alvo
-    df = df.drop(columns=["date_unregistration"])
-    return df
+    # Removendo datas do futuro que causariam Data Leakage
+    df_final = df_final.drop(columns=["date_unregistration"])
+    
+    return df_final
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dados", default="data/raw", help="pasta com os CSVs")
-    ap.add_argument("--cutoff", type=int, default=90, help="dia de corte (-1 = curso inteiro)")
-    ap.add_argument("--saida", default="data/processed/dataset_evasao_pt.csv")
-    ap.add_argument("--traduzir", action="store_true",
-                    help="traduz colunas e categorias para português (usa traducao_oulad.py)")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dados", default="data/raw", help="Caminho da pasta com os arquivos CSV originais")
+    parser.add_argument("--cutoff", type=int, default=90, help="Dia de corte para simular a evasão no meio do curso")
+    parser.add_argument("--saida", default="data/processed/dataset_evasao_pt.csv")
+    parser.add_argument("--traduzir", action="store_true", help="Se True, traduz categorias para o português")
+    args = parser.parse_args()
 
-    cutoff = None if args.cutoff < 0 else args.cutoff
-    df = montar(Path(args.dados), cutoff)
+    corte_dias = None if args.cutoff < 0 else args.cutoff
+    
+    dataset_completo = montar_dataset_final(Path(args.dados), corte_dias)
+    
     if args.traduzir:
         from src.traducao import traduzir
-        df = traduzir(df)
+        dataset_completo = traduzir(dataset_completo)
 
-    print(f"\nShape final: {df.shape}")
-    print(f"Taxa de evasão: {df['evasao'].mean():.1%}")
-    print(f"Nulos por coluna (top 8):\n{df.isna().sum().sort_values(ascending=False).head(8)}")
-    df.to_csv(args.saida, index=False)
-    print(f"\nSalvo em {args.saida}")
+    print(f"\nResumo da Base de Evasão (Corte: {corte_dias} dias):")
+    print(f"Total de Linhas: {dataset_completo.shape[0]} | Colunas: {dataset_completo.shape[1]}")
+    print(f"Taxa Média de Evasão: {dataset_completo['evadiu'].mean():.1%}")
+    
+    dataset_completo.to_csv(args.saida, index=False)
+    print(f"\nDataset consolidado com sucesso em: {args.saida}")

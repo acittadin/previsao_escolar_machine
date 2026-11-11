@@ -1,14 +1,3 @@
-"""
-Executa o pipeline completo do projeto.
-
-    python main.py                       # limpeza -> EDA -> KMeans -> modelagem
-    python main.py --etapas eda kmeans   # só algumas etapas
-    python main.py --agregar             # inclui a agregação a partir dos CSVs brutos (data/raw)
-    python main.py --rapido              # modelagem com grades reduzidas (teste rápido)
-
-Etapas: agregacao, limpeza, eda, kmeans, modelagem, cortes
-    python main.py --etapas cortes        # experimento com cortes de 0 a 180 dias (~12 min)
-"""
 import argparse
 import subprocess
 import sys
@@ -16,46 +5,65 @@ import time
 
 from src import clusterizacao, config as C, eda, experimento_cortes, limpeza, modelagem
 
-ETAPAS = ["agregacao", "limpeza", "eda", "kmeans", "modelagem", "cortes"]
-OPCIONAIS = {"agregacao", "cortes"}   # só rodam se pedidas
-
+ETAPAS_DISPONIVEIS = ["agregacao", "limpeza", "eda", "kmeans", "modelagem", "cortes"]
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("--etapas", nargs="+", choices=ETAPAS, help="etapas a executar (padrão: limpeza, eda, kmeans, modelagem)")
-    ap.add_argument("--agregar", action="store_true", help="inclui a etapa de agregação dos dados brutos")
-    ap.add_argument("--rapido", action="store_true", help="modelagem com grades reduzidas")
-    a = ap.parse_args()
+    parser = argparse.ArgumentParser(description="Pipeline do Projeto de Evasão Escolar (OULAD)")
+    parser.add_argument("--etapas", nargs="+", choices=ETAPAS_DISPONIVEIS, 
+                        help="Etapas específicas para rodar (ex: limpeza eda kmeans modelagem)")
+    parser.add_argument("--agregar", action="store_true", help="Força a agregação dos CSVs brutos primeiro")
+    parser.add_argument("--rapido", action="store_true", help="Roda a modelagem mais rápido (grades menores para teste)")
+    
+    args = parser.parse_args()
 
-    etapas = a.etapas or [e for e in ETAPAS if e not in OPCIONAIS or (e == "agregacao" and a.agregar)]
+    # Se o usuário não passar etapas específicas, roda o fluxo padrão
+    etapas_para_rodar = args.etapas
+    if not etapas_para_rodar:
+        etapas_para_rodar = ["limpeza", "eda", "kmeans", "modelagem"]
+        if args.agregar:
+            etapas_para_rodar.insert(0, "agregacao")
 
-    for etapa in etapas:
-        print(f"\n{'=' * 78}\n>>> ETAPA: {etapa.upper()}\n{'=' * 78}")
+    for etapa in etapas_para_rodar:
+        print(f"\n{'=' * 60}\n>>> EXECUTANDO ETAPA: {etapa.upper()}\n{'=' * 60}")
         t0 = time.time()
+        
         if etapa == "agregacao":
-            if not (C.DADOS_RAW / "studentVle.csv").exists():
-                sys.exit(f"CSVs brutos não encontrados em {C.DADOS_RAW}. Veja o README.")
-            subprocess.run([sys.executable, "-m", "src.agregacao", "--dados", str(C.DADOS_RAW),
-                            "--cutoff", str(C.CUTOFF_DIAS), "--traduzir", "--saida", str(C.DATASET_PT)],
-                           check=True)
+            arquivo_vle = C.DADOS_RAW / "studentVle.csv"
+            if not arquivo_vle.exists():
+                sys.exit(f"Erro: Arquivos brutos não encontrados em {C.DADOS_RAW}. Coloque os CSVs na pasta primeiro.")
+            
+            # Executa o script de agregação passando os argumentos via linha de comando
+            subprocess.run([
+                sys.executable, "-m", "src.agregacao", 
+                "--dados", str(C.DADOS_RAW),
+                "--cutoff", str(C.CUTOFF_DIAS), 
+                "--traduzir", 
+                "--saida", str(C.DATASET_PT)
+            ], check=True)
+            
         elif etapa == "limpeza":
             limpeza.main()
+            
         elif etapa == "eda":
             eda.main()
+            
         elif etapa == "kmeans":
             clusterizacao.main()
+            
         elif etapa == "modelagem":
-            modelagem.main(rapido=a.rapido)
+            modelagem.main(rapido=args.rapido)
+            
         elif etapa == "cortes":
-            E = experimento_cortes
             if (C.DADOS_RAW / "studentVle.csv").exists():
-                E.agregar(E.CORTES_PADRAO, C.DADOS_RAW)
+                experimento_cortes.agregar_cortes(experimento_cortes.CORTES_PADRAO, C.DADOS_RAW)
             else:
-                print("CSVs brutos ausentes: usando os datasets por corte já salvos em data/processed/cortes/")
-            E.modelar(E.CORTES_PADRAO)
-            E.relatorio()
-        print(f"[{etapa}] concluída em {time.time() - t0:.0f}s")
+                print("CSVs brutos ausentes. Usando os datasets já gerados na pasta data/processed/cortes/")
 
+            experimento_cortes.modelar(experimento_cortes.CORTES_PADRAO)
+            experimento_cortes.relatorio()
+            
+        tempo_gasto = time.time() - t0
+        print(f"[{etapa}] finalizada em {tempo_gasto:.0f} segundos.")
 
 if __name__ == "__main__":
     main()
