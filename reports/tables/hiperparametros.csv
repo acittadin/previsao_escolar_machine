@@ -1,9 +1,0 @@
-modelo,hiperparametros
-Regressão Logística (baseline),{'clf__C': 0.1}
-Árvore de Decisão,"{'clf__max_depth': 6, 'clf__min_samples_leaf': 50}"
-Random Forest,"{'clf__max_depth': 8, 'clf__min_samples_leaf': 20}"
-Extra Trees,"{'clf__max_depth': 10, 'clf__min_samples_leaf': 10}"
-Gradient Boosting,"{'clf__learning_rate': 0.05, 'clf__max_depth': 3}"
-SVM Linear,{'clf__C': 0.1}
-SVM RBF,"{'clf__C': 1, 'clf__gamma': 'scale'}"
-Voting (RF + GB + LR),{'voting': 'soft'}

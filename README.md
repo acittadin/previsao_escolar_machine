@@ -1,176 +1,165 @@
-# Educação e Impacto Social: Previsão de Evasão Escolar
+# Previsão de evasão escolar (OULAD)
 
-Projeto de Machine Learning sobre o **Open University Learning Analytics Dataset (OULAD)**.
-Objetivo: identificar, **no dia 90 do curso**, estudantes com maior risco de evadir (`Withdrawn`), para que a
-instituição possa intervir a tempo.
+Projeto de Machine Learning que prevê, **no 90º dia do curso**, quais estudantes de educação a distância têm maior risco de evadir
+(cancelar a matrícula), usando o *Open University Learning Analytics Dataset* (OULAD).
 
-Técnicas aplicadas: **limpeza e engenharia de dados, análise exploratória, KMeans, Árvore de Decisão,
-Ensembles (Random Forest, Extra Trees, Gradient Boosting, Voting) e SVM (linear e RBF)**.
-
----
+Técnicas: **K-Means**, **Árvore de Decisão**, **ensembles** (Random Forest, Extra Trees, Gradient Boosting, Voting) e **SVM** (linear e RBF),
+com **Regressão Logística** como modelo de referência. Mesma organização do repositório `machine-learning-satc`
+(`setup/` + `src/version1` + `src/version2`, um módulo por assunto, `main.py` dirigido por flags).
 
 ## Estrutura
 
 ```
-projeto_evasao_oulad/
-├── main.py                     # executa o pipeline (python main.py)
+previsao_escolar_machine/
+├── README.md
 ├── requirements.txt
 ├── data/
-│   ├── raw/                    # coloque aqui os 7 CSVs do OULAD (não incluídos: ~450 MB)
-│   └── processed/
-│       ├── cortes/                 # datasets agregados para cortes de 0, 30, 60, 90, 120 e 180 dias
-│       ├── dataset_evasao_pt.csv   # agregado + traduzido (entrada da limpeza)
-│       ├── dataset_limpo.csv       # saída da limpeza
-│       └── dicionario_dados.csv
-├── src/
-│   ├── config.py               # caminhos, semente, corte de 90 dias, oferta de teste
-│   ├── agregacao.py            # CSVs brutos -> 1 linha por estudante x módulo x oferta
-│   ├── traducao.py             # colunas e categorias em português
-│   ├── limpeza.py              # limpeza determinística + split treino/teste
-│   ├── eda.py                  # análise exploratória
-│   ├── clusterizacao.py        # KMeans
-│   ├── modelagem.py            # árvore, ensembles, SVM
-│   └── experimento_cortes.py   # experimento com diferentes dias de corte
+│   ├── raw/                      # coloque aqui os 7 CSVs originais do OULAD (não vão para o git)
+│   ├── oulad_evasao.csv          # dataset agregado (corte de 90 dias), gerado pelo setup
+│   └── cortes/                   # um dataset por corte (0, 30, 60, 90, 120, 180 dias)
+├── setup/
+│   └── agregarOulad.py           # roda UMA vez: CSVs originais -> data/oulad_evasao.csv
 ├── reports/
-│   ├── figures/{eda,clusters,modelos}/
-│   └── tables/                 # todas as métricas e tabelas em CSV
-└── models/                     # kmeans.joblib e melhor_modelo.joblib
+│   ├── figures/                  # figuras do relatório (geradas com gerarGraficos = True)
+│   └── tables/                   # cortes_resultados.csv (gerado pelo experimento de cortes)
+└── src/
+    ├── version1/                 # primeira abordagem (simples)
+    │   ├── main.py  preprocessamento.py  arvore.py  ensembles.py  svm.py  avaliacao.py
+    └── version2/                 # versão final
+        ├── main.py               # flags de configuração + fluxo completo
+        ├── preprocessamento.py   # limpeza, tratamento e divisão treino/teste (temporal)
+        ├── eda.py                # análise exploratória (tabelas)
+        ├── regressao.py  arvore.py  ensembles.py  svm.py    # um módulo por família de modelo
+        ├── modelos.py            # parâmetros padrão e criação dos 8 modelos
+        ├── kmeans.py             # agrupamento (perfis de estudantes)
+        ├── graficos.py           # figuras do relatório (salvas em reports/figures/)
+        ├── avaliacao.py          # validação, limiar, métricas, lift, faixas de risco
+        ├── selecao.py            # seleção de atributos por grupos
+        ├── previsao.py  alunos.py   # previsão para novos alunos (alunos de exemplo)
+        └── cortes.py             # experimento: e se a previsão for feita em outro dia do curso?
 ```
 
 ## Como executar
 
+1. Instale as dependências (testado com Python 3.12):
+
 ```bash
 pip install -r requirements.txt
-python main.py                  # limpeza -> EDA -> KMeans -> modelagem (~5 min, 1 núcleo)
-python main.py --agregar        # inclui a agregação (exige os CSVs em data/raw, alguns minutos)
-python main.py --etapas eda kmeans
-python main.py --rapido         # modelagem com grades reduzidas (~2 min)
-python main.py --etapas cortes  # experimento com vários dias de corte (~12 min)
 ```
 
-O dataset já agregado está em `data/processed/`, então o projeto roda sem os CSVs brutos.
-Os CSVs originais estão em https://analyse.kmi.open.ac.uk/open_dataset (ou no Kaggle, como `archive.zip`).
+   (pandas, numpy, scikit-learn >= 1.2, matplotlib e seaborn; as duas últimas só são usadas para gerar as figuras)
 
----
+2. Baixe o OULAD (`archive.zip`, em https://analyse.kmi.open.ac.uk/open_dataset, licença CC BY 4.0) e extraia os 7 CSVs em `data/raw/`.
 
-## Decisões metodológicas
+3. Gere o dataset agregado (apenas uma vez), a partir da **raiz do projeto**:
 
-| Decisão | Motivo |
+```bash
+python setup/agregarOulad.py                              # corte de 90 dias -> data/oulad_evasao.csv
+python setup/agregarOulad.py --cortes 0 30 60 90 120 180  # também gera data/cortes/ (para o experimento de cortes)
+```
+
+4. Rode uma das versões, também a partir da raiz:
+
+```bash
+python src/version1/main.py     # ~1 min
+python src/version2/main.py     # ~3 min (8 modelos, 1 núcleo)
+```
+
+## Flags do `src/version2/main.py`
+
+| Flag | O que faz |
 |---|---|
-| **Unidade de análise**: estudante × módulo × oferta | É a granularidade em que a evasão acontece |
-| **Alvo**: `evasao = 1` se `final_result == Withdrawn` | Definição direta de evasão |
-| **Corte no dia 90** | Só usa informação disponível até lá (previsão precoce, sem vazamento temporal) |
-| **Remoção de quem já cancelou até o dia 90** (7.031) | Para eles a evasão já é conhecida; não há o que prever |
-| **`date_unregistration` e `resultado_final` fora das features** | Vazam o alvo |
-| **Split temporal**: treino 2013B, 2013J, 2014B; teste 2014J | Simula o uso real: treinar com o passado e prever a oferta seguinte |
-| **Validação cruzada agrupada por estudante** (GroupKFold) | O mesmo estudante aparece em várias ofertas; evita vazar entre folds |
-| **Imputação, escala e one-hot dentro do `Pipeline`** | Ajustados só no treino |
-| **`class_weight="balanced"`** | Evasão é ~12% (classes desbalanceadas) |
-| **Métrica principal: PR-AUC**, mais F1/recall da classe "evade" | Acurácia é enganosa com classes desbalanceadas |
-| **Limiar de decisão escolhido por F1 nas previsões out-of-fold do treino** | O teste nunca é usado para escolher nada |
-| **Melhor modelo escolhido pela PR-AUC out-of-fold**, não pelo teste | Evita seleção contaminada pelo teste |
+| `analisarExploratoria` | imprime as tabelas da análise exploratória |
+| `avaliar` | treina os 8 modelos, escolhe o limiar no treino e avalia no teste |
+| `analisarRegressao`, `analisarArvore`, `analisarEnsembles`, `analisarSVM` | refazem a busca de parâmetros por validação cruzada (só no treino) |
+| `analisarClusters` | compara k do KMeans e imprime o perfil dos clusters |
+| `selecionar` | testa remover grupos de atributos (demografia, tipos de atividade, avaliações, VLE) |
+| `analisarImportancia` | importância por permutação do melhor modelo (queda da PR-AUC no teste ao embaralhar cada variável) |
+| `analisarCortes` | experimento com cortes de 0 a 180 dias (~10 min; precisa de `data/cortes/`; salva `reports/tables/cortes_resultados.csv`) |
+| `prever` | estima o risco de 3 alunos de exemplo (`alunos.py`) |
+| `gerarGraficos` | salva as 9 figuras do relatório em `reports/figures/` (liga também a importância por permutação; a figura de cortes exige `analisarCortes`) |
+| `escolhidos` | restringe os modelos (ex.: `["Random Forest", "SVM RBF"]`) |
+| `limiares` | limiares fixos mostrados além do limiar F1 escolhido no treino |
 
-**Limpeza (`src/limpeza.py`)**: remoção de colunas que vazam o alvo ou são redundantes (`vle_ultimo_acesso`);
-flags de ausência (`faixa_imd_ausente`, `aval_sem_nota`); quem nunca acessou o VLE recebe 0 cliques; codificação ordinal
-de escolaridade, IMD e idade; `log1p` nas colunas de cliques (assimetria ~3); demais ausências imputadas pela mediana no pipeline.
+## Do dado ao modelo
 
-## Resultados
+- **Unidade**: 1 linha = 1 estudante em 1 oferta de módulo. 25.562 linhas; **12,3% evadem** (classe desbalanceada).
+- **Corte de 90 dias**: só entram eventos (cliques, notas, entregas) até o dia 90; quem já cancelou até lá (7.031) é removido.
+- **Vazamento evitado**: `resultado_final` e `date_unregistration` revelam o desfecho e ficam fora.
+- **Divisão temporal**: treino = ofertas 2013B, 2013J, 2014B (17.029 linhas); teste = 2014J (8.533 linhas). Na validação cruzada, o mesmo estudante fica sempre no mesmo fold (`GroupKFold`).
+- **Pré-processamento dentro do pipeline** (imputação pela mediana, padronização, One-Hot): aprendido só no treino.
+- **Desbalanceamento**: `class_weight="balanced"`. Métrica de validação: PR-AUC. O limiar de decisão (F1) e o "melhor modelo" saem só do treino; o teste nunca escolhe nada.
 
-### Análise exploratória (`reports/figures/eda/`)
-- Evasão geral de **12,3%** (3.133 de 25.562 registros).
-- Os sinais mais fortes são de **desempenho e entrega**: nota média (-0,17), taxa de entrega (-0,16) e atraso médio (+0,13)
-  (correlação de Spearman com a evasão). Quem evade tem nota média de 67 contra 76 de quem permanece.
-- **Cliques recentes pesam mais que o total**: mediana de 4 cliques nos últimos 14 dias para quem evade, contra 19.
-- Fatores demográficos têm efeito modesto (maior evasão com deficiência declarada, tentativas anteriores e menor IMD).
-- A evasão varia bastante por módulo (de 5,6% em GGG a 19,5% em CCC).
+## `version1` x `version2`
 
-### KMeans (`reports/figures/clusters/`)
-Ajustado só no treino, sem usar o alvo; k = 6 (melhor silhueta entre 3 e 6).
-**A silhueta é baixa (0,20): os grupos são pouco separados**, então os clusters servem como perfis descritivos, não como
-segmentos nítidos. Mesmo assim, o cluster de estudantes **desengajados** (~67 dias sem acesso, ~14% de entregas)
-teve **28,5% de evasão no teste**, contra 12,9% na média; o cluster mais engajado teve 5,5%.
+| | version1 | version2 |
+|---|---|---|
+| Divisão | sorteio aleatório 70/30 | temporal (2014J no teste), com grupos por estudante |
+| Nulos | `fillna(0)` | flags de ausência + valores determinísticos + mediana no pipeline |
+| Desbalanceamento | ignorado | pesos de classe e limiar escolhido no treino |
+| Métricas | acurácia, recall, ROC-AUC | PR-AUC, ROC-AUC, F1, recall, lift, faixas de risco |
+| Modelos | Árvore, Random Forest, SVM | 8 modelos + KMeans + seleção de atributos + cortes |
 
-### Modelos supervisionados (teste = oferta 2014J; prevalência de evasão = 12,9%)
+Resultado da **version1** (teste aleatório, 7.669 linhas; baseline de acurácia = 87,7%):
 
-| Modelo | PR-AUC (OOF treino) | ROC-AUC | PR-AUC | Precisão | Recall | F1 | Recall no top 10% |
-|---|---|---|---|---|---|---|---|
-| **Voting (RF + GB + LR)** *(melhor no treino)* | 0,294 | 0,707 | 0,262 | 0,246 | 0,466 | 0,322 | 21,7% |
-| Gradient Boosting | 0,290 | 0,702 | 0,251 | 0,241 | 0,488 | 0,323 | 20,7% |
-| SVM RBF | 0,285 | 0,719 | 0,286 | 0,276 | 0,438 | 0,338 | 27,3% |
-| Extra Trees | 0,283 | 0,723 | **0,301** | 0,288 | 0,493 | **0,364** | **27,8%** |
-| Random Forest | 0,282 | 0,715 | 0,281 | 0,247 | 0,508 | 0,333 | 25,7% |
-| SVM Linear | 0,282 | 0,680 | 0,228 | 0,222 | 0,464 | 0,300 | 19,8% |
-| Regressão Logística (baseline) | 0,282 | 0,679 | 0,224 | 0,225 | 0,430 | 0,296 | 19,3% |
-| Árvore de Decisão | 0,249 | 0,652 | 0,191 | 0,213 | 0,549 | 0,307 | 15,8% |
+| Modelo | Acurácia | Recall da evasão | ROC-AUC |
+|---|---|---|---|
+| Árvore de Decisão | 0,876 | 0,025 | 0,691 |
+| Random Forest | 0,877 | 0,025 | 0,721 |
+| SVM (RBF) | 0,877 | 0,000 | 0,651 |
 
-Leituras principais:
-- **Os modelos superam o acaso** (PR-AUC 0,19 a 0,30 contra 0,129), mas o desempenho é **moderado**: com a informação
-  disponível até o dia 90, a evasão é difícil de prever com precisão.
-- **Ensembles e SVM RBF superam a árvore única e os modelos lineares**, o que sugere relações não lineares.
-  A árvore de decisão é a mais interpretável (`reports/figures/modelos/05_arvore_decisao.png`, `reports/tables/arvore_regras.txt`),
-  porém a menos precisa.
-- As diferenças entre os quatro melhores no teste (Extra Trees, SVM RBF, Random Forest, Voting) são pequenas e
-  **não devem ser tratadas como definitivas**: há um único conjunto de teste e nenhuma repetição com outras sementes.
-  O Voting é o "melhor" por ter sido escolhido pelo critério definido antes do teste (PR-AUC out-of-fold).
-- **Uso prático**: ordenando os estudantes do teste por risco, a evasão real foi de **8,3%** na faixa "baixo" (70% dos estudantes),
-  **21,4%** em "médio" e **27,9%** em "alto" (10% mais arriscados), ou seja, cerca de 2,2 vezes a taxa média.
-  Lista completa em `reports/tables/predicoes_teste.csv`.
-- **Variáveis mais importantes** (permutação): nota ponderada acumulada, taxa de entrega, módulo, cliques nos últimos
-  14 dias e atraso médio nas entregas (`reports/tables/importancia_permutacao.csv`).
+A acurácia fica igual ao baseline e os modelos quase não encontram evasores: **a acurácia engana** nessa base. É o problema que a version2 resolve.
 
-Hiperparâmetros escolhidos em `reports/tables/hiperparametros.csv`. Dois deles ficaram na borda da grade
-(`C=1` no SVM linear e `C=0,5` no SVM RBF), então uma busca mais ampla poderia render pequenos ganhos.
+## Resultados da version2
 
-## Experimento: e se a previsão for feita em outro momento do curso?
+Teste = oferta 2014J (8.533 estudantes; 12,9% evadem). Ordenado pela PR-AUC de validação no treino.
 
-Repeti o pipeline com cortes de **0, 30, 60, 90, 120 e 180 dias** (`src/experimento_cortes.py`). Em cada corte, só entram
-eventos até aquele dia e saem da base os estudantes que já cancelaram até ele. Os modelos e os hiperparâmetros são os mesmos
-(escolhidos no corte de 90 dias), o split é o mesmo (teste = 2014J) e o limiar vem do treino. Resultados em
-`reports/tables/cortes_*.csv` e `reports/figures/cortes/`.
+| Modelo | PR-AUC (treino) | Limiar | Precisão | Recall | F1 | ROC-AUC | PR-AUC | Lift top 10% |
+|---|---|---|---|---|---|---|---|---|
+| Voting (RF + GB + RL) | 0,294 | 0,574 | 0,246 | 0,466 | 0,322 | 0,707 | 0,262 | 2,17 |
+| Gradient Boosting | 0,290 | 0,583 | 0,241 | 0,488 | 0,323 | 0,702 | 0,251 | 2,08 |
+| SVM RBF | 0,285 | 0,423 | 0,276 | 0,438 | 0,338 | 0,719 | 0,286 | 2,73 |
+| Extra Trees | 0,283 | 0,573 | 0,288 | 0,493 | 0,364 | 0,723 | 0,301 | 2,78 |
+| Random Forest | 0,282 | 0,537 | 0,247 | 0,508 | 0,333 | 0,715 | 0,281 | 2,57 |
+| SVM Linear | 0,282 | 0,139* | 0,222 | 0,464 | 0,300 | 0,680 | 0,228 | 1,98 |
+| Regressão Logística (baseline) | 0,282 | 0,598 | 0,225 | 0,430 | 0,296 | 0,679 | 0,224 | 1,93 |
+| Árvore de Decisão | 0,249 | 0,575 | 0,213 | 0,549 | 0,307 | 0,652 | 0,191 | 1,58 |
 
-| Corte (dias) | Estudantes ativos (teste) | Evasão ainda por acontecer (teste) | Extra Trees: ROC-AUC | Extra Trees: PR-AUC ÷ acaso | Extra Trees: lift top 10% |
-|---|---|---|---|---|---|
-| 0 | 10.363 | 28,3% | 0,682 | 1,61x | 1,94 |
-| 30 | 9.203 | 19,2% | 0,698 | 2,02x | 2,56 |
-| 60 | 8.818 | 15,7% | 0,710 | 2,21x | 2,72 |
-| 90 | 8.533 | 12,9% | 0,723 | 2,33x | 2,78 |
-| 120 | 8.260 | 10,0% | 0,741 | 2,50x | 2,92 |
-| 180 | 7.719 | 3,7% | 0,771 | 2,54x | 2,98 |
+\* No SVM linear o limiar é aplicado à distância até a margem, não a uma probabilidade. Baseline da PR-AUC = prevalência = 0,129.
 
-**Como ler (cuidado com a comparação entre cortes):**
-- **PR-AUC e F1 absolutos caem muito com o corte** (por exemplo, F1 de ~0,50 no dia 0 para ~0,14 no dia 180), mas isso se deve
-  principalmente à queda da evasão restante: de 28,3% para 3,7%. Com menos casos positivos, essas métricas pioram mesmo que o
-  modelo discrimine melhor. **Elas não são comparáveis entre cortes.**
-- As métricas comparáveis são **ROC-AUC, PR-AUC ÷ prevalência e lift**, e as três **melhoram com o corte**. Cada dia a mais de
-  histórico dá ao modelo mais sinal (notas, entregas, cliques recentes) sobre quem ainda vai sair.
-- **Já no dia 0** (só com dados demográficos, de matrícula e módulo, mais cliques pré-curso) os modelos têm ROC-AUC de cerca de
-  0,68 a 0,70 (a árvore única fica em 0,64), acima do acaso, mas a melhora até o dia 90 (0,72) é modesta.
-- **O ganho tem um custo operacional.** No dia 180 restam só cerca de 290 evasões no teste, com precisão de ~8% no limiar de F1.
-  Mesmo com ROC-AUC mais alto (0,77), sobra pouco tempo para intervir e quase tudo o que o modelo sinaliza é falso positivo.
-  Já no dia 0, ele sinaliza muita gente (evasão de 28%), mas com pouca capacidade de separar quem realmente vai evadir.
-- **O melhor modelo varia com o corte** (critério: PR-AUC out-of-fold no treino): Regressão Logística nos cortes 0 e 30, SVM RBF
-  no 60 e Gradient Boosting no 90, 120 e 180. As curvas por modelo são irregulares (por exemplo, o lift do Gradient Boosting
-  salta no corte 120 e cai no 180), o que indica **ruído de um único split e uma única semente**. A conclusão robusta é a tendência
-  geral, não a posição de cada modelo em cada corte.
-- Um ponto intermediário (30 a 90 dias) parece um bom compromisso entre tempo para intervir e capacidade de previsão, mas essa é
-  uma leitura dos dados, não uma recomendação: a escolha depende do custo da intervenção e de quanto tempo ela leva para fazer efeito.
+- Todos superam o acaso, mas o desempenho é **moderado**. As diferenças entre os quatro melhores são pequenas: há um único teste e uma única semente, então não devem ser tratadas como definitivas.
+- **Faixas de risco** (Voting): evasão real de 8,3% no risco baixo (70% dos estudantes), 21,4% no médio e 27,9% nos 10% de maior risco (cerca de 2,2 vezes a média).
+- **K-Means** (k = 6): silhueta de 0,20, ou seja, grupos pouco separados (perfis descritivos). O grupo dos desengajados (~67 dias sem acesso, 14% de entregas) teve 28,5% de evasão no teste.
+- **Seleção de atributos** (PR-AUC de validação): remover as **avaliações** derruba cerca de 0,065 (são o grupo mais importante); remover a demografia custa 0,003 a 0,006; remover os 19 tipos de atividade do VLE muda a PR-AUC em menos de 0,004 (descartáveis).
+- **Árvore**: a raiz divide pela nota ponderada acumulada (≤ 26,9); `mostrarRegras` imprime as regras.
+- **Importância por permutação** (Voting, queda da PR-AUC no teste): nota ponderada acumulada (0,044), taxa de entrega (0,038), módulo (0,031) e cliques dos últimos 14 dias (0,024).
+- O escore de `previsao.py` **não é uma probabilidade calibrada** (modelos com pesos de classe superestimam o risco): serve para ordenar estudantes e comparar com o limiar.
+
+### Experimento de cortes (`analisarCortes`)
+
+Mesmos modelos e parâmetros, mudando só o dia de corte (Extra Trees no teste):
+
+| Corte (dias) | Estudantes no teste | Evasão restante | ROC-AUC | PR-AUC ÷ acaso | Lift top 10% | F1 |
+|---|---|---|---|---|---|---|
+| 0 | 10.363 | 28,3% | 0,682 | 1,61 | 1,94 | 0,499 |
+| 30 | 9.203 | 19,2% | 0,698 | 2,02 | 2,56 | 0,414 |
+| 60 | 8.818 | 15,7% | 0,710 | 2,21 | 2,72 | 0,375 |
+| 90 | 8.533 | 12,9% | 0,723 | 2,33 | 2,78 | 0,364 |
+| 120 | 8.260 | 10,0% | 0,741 | 2,50 | 2,92 | 0,322 |
+| 180 | 7.719 | 3,7% | 0,771 | 2,54 | 2,98 | 0,145 |
+
+ROC-AUC, PR-AUC ÷ prevalência e lift melhoram com o corte. **PR-AUC e F1 absolutos caem só porque sobra menos evasão para prever: não são comparáveis entre cortes.**
 
 ## Limitações
 
-- **Experimento de cortes:** os hiperparâmetros foram ajustados só no corte de 90 dias e reaproveitados nos demais, o que pode
-  favorecê-lo levemente; e a população muda a cada corte (saem os que já cancelaram), então os cortes avaliam problemas diferentes.
-- **Um único split temporal** (teste = 2014J): sem intervalos de confiança. Vale repetir com outros cortes
-  (por exemplo, testar em 2014B) e com várias sementes para medir a variabilidade.
-- **Estudantes repetidos**: parte dos estudantes do teste também aparece no treino em ofertas anteriores
-  (histórico legítimo em uso real), mas o desempenho pode diferir para estudantes nunca vistos.
-- **Prever a evasão não significa explicá-la**: as importâncias mostram associação, não causa.
-- **Equidade**: variáveis como deficiência, idade e região entram no modelo; antes de qualquer uso real, é preciso
-  auditar se o desempenho é parecido entre grupos e se o uso do modelo não prejudica ninguém.
-- O dataset é de uma universidade a distância do Reino Unido; os resultados podem não se transferir para outros contextos.
+- Um único split temporal e uma única semente, sem intervalos de confiança.
+- Parâmetros ajustados no corte de 90 dias e reaproveitados nos outros cortes.
+- A população muda a cada corte (saem os que já cancelaram).
+- Dados de uma universidade a distância do Reino Unido; pode não generalizar.
+- Variáveis como deficiência, idade e região entram nos modelos: antes de qualquer uso real, auditar o desempenho por grupo (equidade).
+- A importância dos atributos mostra associação, não causa.
 
-## Extensões sugeridas
-1. Reajustar os hiperparâmetros em cada corte e repetir com várias sementes e outros splits temporais, para estimar a variabilidade.
-2. Usar o cluster do KMeans como feature adicional dos modelos supervisionados.
-3. Calibrar as probabilidades e analisar custo-benefício de intervenção por faixa de risco.
-4. Auditoria de equidade (desempenho por gênero, deficiência, faixa etária e região).
-5. Explicabilidade local (por exemplo, SHAP) para justificar o risco de cada estudante.
+## Reprodutibilidade
+
+Semente fixa em 42. Todas as tabelas acima foram obtidas rodando `src/version1/main.py` e `src/version2/main.py` a partir dos CSVs originais
+e coincidem com os resultados do projeto anterior (`projeto_evasao_oulad`) que serviu de base.
